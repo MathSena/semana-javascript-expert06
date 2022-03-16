@@ -22,7 +22,22 @@ export default {
       testEnvironment: 'node',
       displayName: 'backend',
       collectCoverageFrom: ['server/', '!server/index.js'],
+      transformIgnorePatterns: [
+        ...defaultConfig.transformIgnorePatterns,
+        'public'
+      ],
       testMatch: ['**/tests/**/server/**/*.test.js']
+    },
+    {
+      ...defaultConfig,
+      testEnvironment: 'jsdom',
+      displayName: 'frontend',
+      collectCoverageFrom: ['public/'],
+      transformIgnorePatterns: [
+        ...defaultConfig.transformIgnorePatterns,
+        'server'
+      ],
+      testMatch: ['**/tests/**/public/**/*.test.js']
     }
   ]
 }
