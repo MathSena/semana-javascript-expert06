@@ -11,6 +11,16 @@ export class Controller {
   }
 
   createFileStream() {
-    this.service.createClientStream()
+    const { id, clientStream } = this.service.createClientStream()
+
+    const onClose = () => {
+      logger.info(`closing connection pf ${id}`)
+      this.service.removeClientStream(id)
+    }
+
+    return {
+      stream: clientStream,
+      onClose
+    }
   }
 }
