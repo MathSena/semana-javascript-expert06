@@ -5,7 +5,6 @@ const root = join(currentDir, '../')
 const audioDirectory = join(root, 'audio')
 const publicDirectory = join(root, 'public')
 const songsDirectory = join(audioDirectory, 'songs')
-
 export default {
   port: process.env.PORT || 3000,
   dir: {
@@ -31,7 +30,7 @@ export default {
     audioMediaType: 'mp3',
     songVolume: '0.99',
     fallbackBitRate: '128000',
-    bitRadio: 8,
-    englishConversion: join(songsDirectory, 'conversation.mp3')
+    bitRateDivisor: 8,
+    englishConversation: join(songsDirectory, 'conversation.mp3')
   }
 }
