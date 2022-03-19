@@ -2,18 +2,25 @@ import fs from 'fs'
 import fsPromises from 'fs/promises'
 import { randomUUID } from 'crypto'
 import config from './config.js'
-import { PassThrough } from 'stream'
-import throttle from 'throttle'
+import { PassThrough, Writable } from 'stream'
+import { once } from 'events'
+import streamsPromises from 'stream/promises'
+
+import Throttle from 'throttle'
 import childProcess from 'child_process'
 import { logger } from './util.js'
 import { join, extname } from 'path'
 const {
   dir: { publicDirectory },
-  constants: { fallbackBitRate }
+  constants: { fallbackBitRate, englishConversation, bitRateDivisor }
 } = config
 export class Service {
   constructor() {
     this.clientStreams = new Map()
+    this.currentSong = englishConversation
+    this.currentBitRate = 0
+    this.throttleTransform = {}
+    this.currentReadable = {}
   }
 
   createClientStream() {
@@ -26,6 +33,7 @@ export class Service {
       clientStream
     }
   }
+
   removeClientStream(id) {
     this.clientStreams.delete(id)
   }
@@ -34,38 +42,74 @@ export class Service {
     return childProcess.spawn('sox', args)
   }
 
-  createFileStream(filename) {
-    return fs.createReadStream(filename)
-  }
-
-  async getBitRage(song) {
+  async getBitRate(song) {
     try {
-      const aregs = [
-        '--i', // information
+      const args = [
+        '--i', // info
         '-B', // bitrate
         song
       ]
-
       const {
-        stderr,
-        stdout
-        // stdin
+        stderr, // erro
+        stdout // log
+        // stdin // enviar dados como stream
       } = this._executeSoxCommand(args)
 
-      const [sucess, error] = [stdout, stderr].map(stream => stream.read())
-      if (error) return await Promise.reject(error)
+      await Promise.all([once(stderr, 'readable'), once(stdout, 'readable')])
 
-      return sucess.toString().trim().replace(/k/, '000')
+      const [success, error] = [stdout, stderr].map(stream => stream.read())
+      if (error) return await Promise.reject(error)
+      return success.toString().trim().replace(/k/, '000')
     } catch (error) {
-      logger.error(`Deu ruim no bitrate: ${error}`)
+      logger.error(`deu ruim no bitrate: ${error}`)
+
       return fallbackBitRate
     }
+  }
+
+  broadCast() {
+    return new Writable({
+      write: (chunk, enc, cb) => {
+        for (const [id, stream] of this.clientStreams) {
+          if (stream.writableEnded) {
+            this.clientStreams.delete(id)
+            continue
+          }
+
+          stream.write(chunk)
+        }
+
+        cb()
+      }
+    })
+  }
+  async startStreamming() {
+    logger.info(`starting with ${this.currentSong}`)
+    const bitRate = (this.currentBitRate =
+      (await this.getBitRate(this.currentSong)) / bitRateDivisor)
+    const throttleTransform = (this.throttleTransform = new Throttle(bitRate))
+    const songReadable = (this.currentReadable = this.createFileStream(
+      this.currentSong
+    ))
+    return streamsPromises.pipeline(
+      songReadable,
+      throttleTransform,
+      this.broadCast()
+    )
+  }
+
+  stopStreamming() {
+    this.throttleTransform?.end?.()
+  }
+
+  createFileStream(filename) {
+    return fs.createReadStream(filename)
   }
 
   async getFileInfo(file) {
     // file = home/index.html
     const fullFilePath = join(publicDirectory, file)
-    //Validação
+    // valida se existe, se não existe -> erro
     await fsPromises.access(fullFilePath)
     const fileType = extname(fullFilePath)
     return {
