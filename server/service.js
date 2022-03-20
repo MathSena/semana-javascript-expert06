@@ -9,10 +9,17 @@ import streamsPromises from 'stream/promises'
 import Throttle from 'throttle'
 import childProcess from 'child_process'
 import { logger } from './util.js'
-import { join, extname } from 'path'
+import path, { join, extname } from 'path'
 const {
-  dir: { publicDirectory },
-  constants: { fallbackBitRate, englishConversation, bitRateDivisor }
+  dir: { publicDirectory, fxDirectory },
+  constants: {
+    fallbackBitRate,
+    englishConversation,
+    bitRateDivisor,
+    audioMediaType,
+    songVolume,
+    fxVolume
+  }
 } = config
 export class Service {
   constructor() {
@@ -109,7 +116,7 @@ export class Service {
   async getFileInfo(file) {
     // file = home/index.html
     const fullFilePath = join(publicDirectory, file)
-    // valida se existe, se não existe -> erro
+    // valida se existe, se não existe estoura erro!!
     await fsPromises.access(fullFilePath)
     const fileType = extname(fullFilePath)
     return {
@@ -124,5 +131,60 @@ export class Service {
       stream: this.createFileStream(name),
       type
     }
+  }
+
+  async readFxByName(fxName) {
+    const songs = await fsPromises.readdir(fxDirectory)
+    const chosenSong = songs.find(filename =>
+      filename.toLowerCase().includes(fxName)
+    )
+    if (!chosenSong) return Promise.reject(`the song ${fxName} wasn't found!`)
+
+    return path.join(fxDirectory, chosenSong)
+  }
+
+  appendFxStream(fx) {
+    const throttleTransformable = new Throttle(this.currentBitRate)
+    streamsPromises.pipeline(throttleTransformable, this.broadCast())
+
+    const unpipe = () => {
+      const transformStream = this.mergeAudioStreams(fx, this.currentReadable)
+
+      this.throttleTransform = throttleTransformable
+      this.currentReadable = transformStream
+      this.currentReadable.removeListener('unpipe', unpipe)
+
+      streamsPromises.pipeline(transformStream, throttleTransformable)
+    }
+    this.throttleTransform.on('unpipe', unpipe)
+    this.throttleTransform.pause()
+    this.currentReadable.unpipe(this.throttleTransform)
+  }
+
+  mergeAudioStreams(song, readable) {
+    const transformStream = PassThrough()
+    const args = [
+      '-t',
+      audioMediaType,
+      '-v',
+      songVolume,
+      '-m',
+      '-',
+      '-t',
+      audioMediaType,
+      '-v',
+      fxVolume,
+      song,
+      '-t',
+      audioMediaType,
+      '-'
+    ]
+
+    const { stdout, stdin } = this._executeSoxCommand(args)
+
+    streamsPromises.pipeline(readable, stdin)
+
+    streamsPromises.pipeline(stdout, transformStream)
+    return transformStream
   }
 }
